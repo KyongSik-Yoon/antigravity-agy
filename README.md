@@ -1,5 +1,7 @@
 # antigravity-agy
 
+[English](README.md) · [한국어](README.ko.md)
+
 Orchestrate **Google Antigravity** (the `agy` CLI) from **Claude Code** — a mirror of the
 OpenAI `codex` plugin, but for `agy`. Delegate coding tasks, get a second opinion, and run
 code reviews from Gemini / Claude / GPT models exposed by Antigravity, with no OAuth wiring:
@@ -27,20 +29,25 @@ each CLI keeps its own auth, Claude just shells out.
 | `/agy:status [--all]` | Status of background jobs |
 | `/agy:result [job-id]` | Fetch a finished background job's output |
 | `/agy:config [set-model "<name>"]` | Show or persist the default model |
+| `/agy:hint` | Cheat-sheet: active model, available models, commands |
 
 ## Model selection
 
+Default model: **`Gemini 3.5 Flash (High)`**.
+
 Per-call: `--model "<name>"` (exact string from `agy models`, e.g. `"Gemini 3.1 Pro (High)"`).
+A `--model` passed to `task` is **persisted** as the new default.
 
 Persisted default (`~/.claude/agy/config.json`):
 
 ```
 /agy:config set-model "Gemini 3.1 Pro (High)"
 /agy:config                 # show
-/agy:config clear-model
+/agy:config clear-model     # back to Gemini 3.5 Flash (High)
 ```
 
-Precedence: `--model` flag > `AGY_MODEL` env var > saved config > agy default. Applies to `task` and `review`.
+Precedence: `--model` flag > `AGY_MODEL` env var > saved config > built-in default.
+Applies to `task` and `review`.
 
 ## Permission model (safe by default)
 
