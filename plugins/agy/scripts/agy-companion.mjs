@@ -24,8 +24,8 @@ function readConfig() {
   try { return JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8")); } catch { return {}; }
 }
 function writeConfig(cfg) {
-  fs.mkdirSync(AGY_HOME, { recursive: true });
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2));
+  fs.mkdirSync(AGY_HOME, { recursive: true, mode: 0o700 });
+  fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2), { mode: 0o600 });
 }
 const DEFAULT_MODEL = "Gemini 3.5 Flash (High)";
 // Precedence: explicit --model flag > AGY_MODEL env > config.json > built-in default.
@@ -53,8 +53,11 @@ function usage() {
 function newId(prefix) { return `${prefix}-${randomBytes(5).toString("hex")}`; }
 function jobPath(id) { return path.join(JOBS_DIR, `${id}.json`); }
 function writeJob(job) {
-  fs.mkdirSync(JOBS_DIR, { recursive: true });
-  fs.writeFileSync(jobPath(job.id), JSON.stringify(job, null, 2));
+  // Job files hold prompts + agy output in plaintext. On shared multi-user
+  // machines keep them owner-only: dir 0700, files 0600.
+  fs.mkdirSync(JOBS_DIR, { recursive: true, mode: 0o700 });
+  fs.writeFileSync(jobPath(job.id), JSON.stringify(job, null, 2), { mode: 0o600 });
+  try { fs.chmodSync(jobPath(job.id), 0o600); } catch {} // enforce on overwrite of pre-existing file
 }
 function readJob(id) {
   try { return JSON.parse(fs.readFileSync(jobPath(id), "utf8")); } catch { return null; }
