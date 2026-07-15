@@ -55,6 +55,11 @@ Applies to `task` and `review`.
 - `--write` = edits allowed, tools still prompt (`--mode accept-edits`)
 - `--yolo` = the only flag that adds `--dangerously-skip-permissions`
 
+## Data & environment safety
+
+- **Env scrubbing**: credential-shaped vars (`*TOKEN*`, `*SECRET*`, `*_KEY`, `AWS_*`, `GITHUB*`, `ANTHROPIC`, `OPENAI`, …) are stripped before launching `agy`, so a third-party subprocess never inherits your tokens. `AGY_*` is kept. Opt out with `AGY_KEEP_ENV=1`.
+- **Review egress guard**: `review` / `adversarial-review` send your `git diff` to Google. They print a provider notice and **refuse** if the diff looks like it contains secrets (private keys, AWS/GitHub tokens, `api_key=`…). Override a false positive with `--force`.
+
 ## How it works
 
 `scripts/agy-companion.mjs` wraps `agy -p` (headless). `agy` has no native background/job

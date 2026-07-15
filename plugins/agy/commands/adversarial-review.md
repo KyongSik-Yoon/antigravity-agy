@@ -11,6 +11,6 @@ Raw arguments: `$ARGUMENTS`
 
 Run:
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/agy-companion.mjs" adversarial-review "$ARGUMENTS"
+node "${CLAUDE_PLUGIN_ROOT}/scripts/agy-companion.mjs" adversarial-review $ARGUMENTS
 ```
 Return the command stdout verbatim. No paraphrase, no commentary.

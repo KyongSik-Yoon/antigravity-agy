@@ -8,5 +8,5 @@ Raw arguments: `$ARGUMENTS`
 
 Run and return stdout verbatim:
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/agy-companion.mjs" result "$ARGUMENTS"
+node "${CLAUDE_PLUGIN_ROOT}/scripts/agy-companion.mjs" result $ARGUMENTS
 ```

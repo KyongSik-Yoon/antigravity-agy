@@ -40,8 +40,8 @@ function persistModel(name) {
 function usage() {
   console.log(`Usage:
   agy-companion task [--background] [--write] [--yolo] [--resume] [--model <m>] [--print-timeout <d>] [prompt]
-  agy-companion review [--base <ref>] [--scope <auto|working-tree|branch>]
-  agy-companion adversarial-review [--base <ref>] [--scope <auto|working-tree|branch>] [focus text]
+  agy-companion review [--base <ref>] [--scope <auto|working-tree|branch>] [--force]
+  agy-companion adversarial-review [--base <ref>] [--scope <auto|working-tree|branch>] [--force] [focus text]
   agy-companion status [job-id] [--all]
   agy-companion result [job-id]
   agy-companion config [set-model "<name>" | clear-model]
@@ -85,9 +85,22 @@ function buildAgyArgs({ prompt, mode, yolo, resume, model, printTimeout }) {
   return args;
 }
 
+// Strip credential-shaped vars before handing the environment to agy (a
+// third-party subprocess). Denylist over allowlist so agy keeps the PATH/auth
+// vars it needs; AGY_* is preserved deliberately. Opt out with AGY_KEEP_ENV=1.
+const SECRET_ENV_RE = /(TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|PRIVATE_KEY|_KEY|APIKEY|SESSION|COOKIE|AUTH|AWS_|GCP_|AZURE_|ANTHROPIC|OPENAI|GITHUB|GITLAB|SLACK|STRIPE|NPM_TOKEN)/i;
+function scrubEnv() {
+  if (process.env.AGY_KEEP_ENV === "1") return process.env;
+  const out = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (k.startsWith("AGY_") || !SECRET_ENV_RE.test(k)) out[k] = v;
+  }
+  return out;
+}
+
 function runAgyForeground(agyArgs, cwd) {
   return new Promise((resolve) => {
-    const child = spawn(AGY_BIN, agyArgs, { cwd, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(AGY_BIN, agyArgs, { cwd, stdio: ["ignore", "pipe", "pipe"], env: scrubEnv() });
     let out = "", err = "";
     child.stdout.on("data", d => out += d);
     child.stderr.on("data", d => err += d);
@@ -143,13 +156,34 @@ async function cmdWorker(argv) {
   writeJob(job);
 }
 
+// Diff review ships local code to a third-party provider (Google Antigravity).
+// Scan for credential-shaped lines and refuse unless --force, and always name
+// the provider on stderr so egress is never silent.
+const SECRET_DIFF_RE = /(-----BEGIN [A-Z ]*PRIVATE KEY|AKIA[0-9A-Z]{16}|ghp_[0-9A-Za-z]{36}|xox[baprs]-[0-9A-Za-z-]+|(?:api[_-]?key|secret|password|passwd|token|authorization)\s*[:=]\s*['"]?[0-9A-Za-z/+_\-]{12,})/i;
+function scanDiffForSecrets(diff) {
+  return diff.split("\n")
+    .filter(l => l.startsWith("+") && SECRET_DIFF_RE.test(l))
+    .slice(0, 5);
+}
+
 async function cmdReview(argv, adversarial) {
-  const o = parseFlags(argv, { bools: [], vals: ["base", "scope"] });
+  const o = parseFlags(argv, { bools: ["force"], vals: ["base", "scope"] });
   const cwd = process.cwd();
   let diff;
   try { diff = gitDiff(cwd, o.base, o.scope); }
   catch (e) { console.error("review: git diff failed: " + e.message); process.exit(2); }
   if (!diff.trim()) { console.log("No changes to review."); return; }
+  const model = resolveModel();
+  if (!o.force) {
+    const hits = scanDiffForSecrets(diff);
+    if (hits.length) {
+      console.error(`review: refusing — diff looks like it contains secrets:\n${hits.map(h => "  " + h.slice(0, 100)).join("\n")}\n` +
+        `This review sends your diff to a third-party provider (agy → Google, model "${model}").\n` +
+        `Remove the secrets, or re-run with --force if this is a false positive.`);
+      process.exit(3);
+    }
+  }
+  console.error(`review: sending diff to third-party provider (agy → Google, model "${model}").`);
   const focus = o._.join(" ").trim();
   const header = adversarial
     ? `You are an adversarial code reviewer. Hunt for bugs, security holes, data-loss and edge-case failures in the diff below. Assume it is broken; prove it. Be specific: file, line, failure scenario.${focus ? " Focus: " + focus : ""}`
