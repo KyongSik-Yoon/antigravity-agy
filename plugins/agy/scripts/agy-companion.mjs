@@ -124,14 +124,46 @@ function scrubEnv() {
   return out;
 }
 
+// Parse a Go-style duration ("5m", "30s", "1h", "5m0s", or bare seconds) to ms.
+function parseDurationMs(s) {
+  if (!s) return null;
+  let ms = 0, matched = false;
+  for (const [, n, u] of s.matchAll(/(\d+(?:\.\d+)?)\s*([hms]?)/g)) {
+    if (!n) continue;
+    const v = parseFloat(n);
+    ms += v * (u === "h" ? 3600e3 : u === "s" ? 1e3 : u === "m" ? 60e3 : 1e3); // bare = seconds
+    matched = true;
+  }
+  return matched ? ms : null;
+}
+// agy's own --print-timeout defaults to 5m when unset. The wrapper enforces a
+// HARD kill 60s later, so a hung agy can never block the caller forever.
+const AGY_DEFAULT_TIMEOUT = "5m";
+const HARD_TIMEOUT_GRACE_MS = parseInt(process.env.AGY_HARD_GRACE_MS || "", 10) || 60e3;
+
 function runAgyForeground(agyArgs, cwd) {
   return new Promise((resolve) => {
-    const child = spawn(AGY_BIN, agyArgs, { cwd, stdio: ["ignore", "pipe", "pipe"], env: scrubEnv() });
-    let out = "", err = "";
+    // detached: agy runs as its own process-group leader so the hard-timeout
+    // can reap the whole subprocess tree (agy + any children), not just agy.
+    const child = spawn(AGY_BIN, agyArgs, { cwd, stdio: ["ignore", "pipe", "pipe"], env: scrubEnv(), detached: true });
+    let out = "", err = "", done = false;
+    const finish = (r) => { if (done) return; done = true; clearTimeout(hard); clearTimeout(kill9); resolve(r); };
+    const killTree = (sig) => { try { process.kill(-child.pid, sig); } catch { try { child.kill(sig); } catch {} } };
+
+    const i = agyArgs.indexOf("--print-timeout");
+    const softMs = parseDurationMs(i >= 0 ? agyArgs[i + 1] : AGY_DEFAULT_TIMEOUT) ?? parseDurationMs(AGY_DEFAULT_TIMEOUT);
+    let kill9;
+    const hard = setTimeout(() => {
+      err += `\nwrapper: agy exceeded ${Math.round((softMs + HARD_TIMEOUT_GRACE_MS) / 1000)}s, terminating.\n`;
+      killTree("SIGTERM");
+      kill9 = setTimeout(() => killTree("SIGKILL"), 5000); // SIGKILL the group if SIGTERM ignored
+      finish({ code: -1, out, err }); // resolve now; kill runs in background
+    }, softMs + HARD_TIMEOUT_GRACE_MS);
+
     child.stdout.on("data", d => out += d);
     child.stderr.on("data", d => err += d);
-    child.on("close", code => resolve({ code, out, err }));
-    child.on("error", e => resolve({ code: -1, out, err: String(e) }));
+    child.on("close", code => finish({ code, out, err }));
+    child.on("error", e => finish({ code: -1, out, err: err + String(e) }));
   });
 }
 

@@ -71,6 +71,9 @@ store under `~/.claude/agy/jobs/` is supervised:
   on `running` whose worker died (crash/OOM/reboot) to `failed`
 - **cancel** — `/agy:cancel` kills the worker process group
 - **retention** — only the newest 50 finished jobs are kept
+- **hard timeout** — the wrapper kills a hung `agy` (and its whole process group) at
+  its `--print-timeout` + 60s, so a foreground call can never block forever. Tune the
+  grace with `AGY_HARD_GRACE_MS`.
 
 ## How it works
 
