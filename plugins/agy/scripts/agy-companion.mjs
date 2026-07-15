@@ -14,9 +14,28 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-const JOBS_DIR = path.join(os.homedir(), ".claude", "agy", "jobs");
+const AGY_HOME = path.join(os.homedir(), ".claude", "agy");
+const JOBS_DIR = path.join(AGY_HOME, "jobs");
+const CONFIG_PATH = path.join(AGY_HOME, "config.json");
 const AGY_BIN = process.env.AGY_BIN || "agy";
 const scriptPath = new URL(import.meta.url).pathname;
+
+function readConfig() {
+  try { return JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8")); } catch { return {}; }
+}
+function writeConfig(cfg) {
+  fs.mkdirSync(AGY_HOME, { recursive: true });
+  fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2));
+}
+const DEFAULT_MODEL = "Gemini 3.5 Flash (High)";
+// Precedence: explicit --model flag > AGY_MODEL env > config.json > built-in default.
+function resolveModel(flagModel) {
+  return flagModel || process.env.AGY_MODEL || readConfig().model || DEFAULT_MODEL;
+}
+// A --model passed on the command line is persisted as the new default.
+function persistModel(name) {
+  const cfg = readConfig(); cfg.model = name; writeConfig(cfg);
+}
 
 function usage() {
   console.log(`Usage:
@@ -25,6 +44,7 @@ function usage() {
   agy-companion adversarial-review [--base <ref>] [--scope <auto|working-tree|branch>] [focus text]
   agy-companion status [job-id] [--all]
   agy-companion result [job-id]
+  agy-companion config [set-model "<name>" | clear-model]
 
   Permissions: default read-only. --write allows edits (still prompts). --yolo bypasses prompts.`);
 }
@@ -88,9 +108,10 @@ async function cmdTask(argv) {
   const prompt = o._.join(" ").trim();
   if (!prompt) { console.error("task: prompt required"); process.exit(2); }
   const cwd = process.cwd();
+  if (o.model) persistModel(o.model); // --model doubles as "remember this default"
   const mode = (o.write || o.yolo) ? "accept-edits" : "plan";
   const agyArgs = buildAgyArgs({
-    prompt, mode, yolo: o.yolo, resume: o.resume, model: o.model,
+    prompt, mode, yolo: o.yolo, resume: o.resume, model: resolveModel(o.model),
     printTimeout: o["print-timeout"] || (o.background ? "30m" : undefined),
   });
 
@@ -130,7 +151,7 @@ async function cmdReview(argv, adversarial) {
     ? `You are an adversarial code reviewer. Hunt for bugs, security holes, data-loss and edge-case failures in the diff below. Assume it is broken; prove it. Be specific: file, line, failure scenario.${focus ? " Focus: " + focus : ""}`
     : `Review the diff below for correctness bugs and clear simplifications. One finding per line: location, problem, fix. No praise.`;
   const prompt = `${header}\n\n\`\`\`diff\n${diff}\n\`\`\``;
-  const r = await runAgyForeground(buildAgyArgs({ prompt, mode: "plan", printTimeout: "15m" }), cwd);
+  const r = await runAgyForeground(buildAgyArgs({ prompt, mode: "plan", model: resolveModel(), printTimeout: "15m" }), cwd);
   process.stdout.write(r.out);
   if (r.code !== 0 && r.err) process.stderr.write(r.err);
   process.exit(r.code === 0 ? 0 : 1);
@@ -160,6 +181,27 @@ function cmdResult(argv) {
   process.stdout.write(job.output || "(no output)\n");
 }
 
+// config: show, set model, or clear.
+//   config                       -> print current config + resolved model
+//   config set-model "<name>"    -> persist default model
+//   config clear-model           -> remove saved default
+function cmdConfig(argv) {
+  const [action, ...rest] = argv;
+  if (action === "set-model") {
+    const name = rest.join(" ").trim();
+    if (!name) { console.error("config set-model: model name required"); process.exit(2); }
+    const cfg = readConfig(); cfg.model = name; writeConfig(cfg);
+    console.log(`Saved default model: ${name}`);
+    return;
+  }
+  if (action === "clear-model") {
+    const cfg = readConfig(); delete cfg.model; writeConfig(cfg);
+    console.log("Cleared default model.");
+    return;
+  }
+  console.log(JSON.stringify({ config: readConfig(), resolvedModel: resolveModel() || "(agy default)" }, null, 2));
+}
+
 function parseFlags(argv, { bools, vals }) {
   const o = { _: [] };
   for (let i = 0; i < argv.length; i++) {
@@ -182,6 +224,7 @@ async function main() {
     case "adversarial-review": return cmdReview(rest, true);
     case "status": return cmdStatus(rest);
     case "result": return cmdResult(rest);
+    case "config": return cmdConfig(rest);
     case "_worker": return cmdWorker(rest);
     case undefined: case "help": case "--help": return usage();
     default: console.error("unknown subcommand: " + sub); usage(); process.exit(2);

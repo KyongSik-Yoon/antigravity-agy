@@ -26,6 +26,21 @@ each CLI keeps its own auth, Claude just shells out.
 | `/agy:adversarial-review [focus]` | Hunt for bugs/security holes in the current diff |
 | `/agy:status [--all]` | Status of background jobs |
 | `/agy:result [job-id]` | Fetch a finished background job's output |
+| `/agy:config [set-model "<name>"]` | Show or persist the default model |
+
+## Model selection
+
+Per-call: `--model "<name>"` (exact string from `agy models`, e.g. `"Gemini 3.1 Pro (High)"`).
+
+Persisted default (`~/.claude/agy/config.json`):
+
+```
+/agy:config set-model "Gemini 3.1 Pro (High)"
+/agy:config                 # show
+/agy:config clear-model
+```
+
+Precedence: `--model` flag > `AGY_MODEL` env var > saved config > agy default. Applies to `task` and `review`.
 
 ## Permission model (safe by default)
 
