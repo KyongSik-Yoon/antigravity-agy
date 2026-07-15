@@ -28,6 +28,7 @@ each CLI keeps its own auth, Claude just shells out.
 | `/agy:adversarial-review [focus]` | Hunt for bugs/security holes in the current diff |
 | `/agy:status [--all]` | Status of background jobs |
 | `/agy:result [job-id]` | Fetch a finished background job's output |
+| `/agy:cancel [job-id]` | Cancel a running background job |
 | `/agy:config [set-model "<name>"]` | Show or persist the default model |
 | `/agy:hint` | Cheat-sheet: active model, available models, commands |
 
@@ -60,10 +61,21 @@ Applies to `task` and `review`.
 - **Env scrubbing**: credential-shaped vars (`*TOKEN*`, `*SECRET*`, `*_KEY`, `AWS_*`, `GITHUB*`, `ANTHROPIC`, `OPENAI`, …) are stripped before launching `agy`, so a third-party subprocess never inherits your tokens. `AGY_*` is kept. Opt out with `AGY_KEEP_ENV=1`.
 - **Review egress guard**: `review` / `adversarial-review` send your `git diff` to Google. They print a provider notice and **refuse** if the diff looks like it contains secrets (private keys, AWS/GitHub tokens, `api_key=`…). Override a false positive with `--force`.
 
+## Background jobs
+
+`task --background` spawns a detached worker and returns a job id. The file-based
+store under `~/.claude/agy/jobs/` is supervised:
+
+- **atomic writes** (temp + rename) — readers never see partial JSON
+- **liveness** — the worker's pid is recorded; `status`/`result` reconcile a job stuck
+  on `running` whose worker died (crash/OOM/reboot) to `failed`
+- **cancel** — `/agy:cancel` kills the worker process group
+- **retention** — only the newest 50 finished jobs are kept
+
 ## How it works
 
 `scripts/agy-companion.mjs` wraps `agy -p` (headless). `agy` has no native background/job
-store, so the companion adds a small file-based one under `~/.claude/agy/jobs/`. `review`
+store, so the companion adds the supervised file-based one above. `review`
 feeds `git diff` to agy and asks for findings.
 
 ## License

@@ -44,33 +44,59 @@ function usage() {
   agy-companion adversarial-review [--base <ref>] [--scope <auto|working-tree|branch>] [--force] [focus text]
   agy-companion status [job-id] [--all]
   agy-companion result [job-id]
+  agy-companion cancel [job-id]
   agy-companion config [set-model "<name>" | clear-model]
   agy-companion hint
 
   Permissions: default read-only. --write allows edits (still prompts). --yolo bypasses prompts.`);
 }
 
+const JOB_RETENTION = 50; // keep newest N finished jobs; prune the rest
+
 function newId(prefix) { return `${prefix}-${randomBytes(5).toString("hex")}`; }
 function jobPath(id) { return path.join(JOBS_DIR, `${id}.json`); }
 function writeJob(job) {
   // Job files hold prompts + agy output in plaintext. On shared multi-user
   // machines keep them owner-only: dir 0700, files 0600.
+  // Atomic write (temp + rename) so a concurrent reader never sees partial JSON.
   fs.mkdirSync(JOBS_DIR, { recursive: true, mode: 0o700 });
-  fs.writeFileSync(jobPath(job.id), JSON.stringify(job, null, 2), { mode: 0o600 });
-  try { fs.chmodSync(jobPath(job.id), 0o600); } catch {} // enforce on overwrite of pre-existing file
+  const tmp = jobPath(`.${job.id}.${process.pid}.tmp`);
+  fs.writeFileSync(tmp, JSON.stringify(job, null, 2), { mode: 0o600 });
+  fs.renameSync(tmp, jobPath(job.id)); // atomic on same filesystem
 }
 function readJob(id) {
   try { return JSON.parse(fs.readFileSync(jobPath(id), "utf8")); } catch { return null; }
 }
-function latestJob() {
-  let files;
-  try { files = fs.readdirSync(JOBS_DIR).filter(f => f.endsWith(".json")); } catch { return null; }
-  let best = null;
-  for (const f of files) {
-    const j = readJob(f.replace(/\.json$/, ""));
-    if (j && (!best || j.startedAt > best.startedAt)) best = j;
+function isAlive(pid) {
+  if (!pid) return false;
+  try { process.kill(pid, 0); return true; } catch (e) { return e.code === "EPERM"; }
+}
+// A job still marked "running" whose worker process is gone died silently
+// (crash, OOM, reboot). Reconcile it to "failed" and persist, so status/result
+// never lie about liveness.
+function reconcile(job) {
+  if (job && job.status === "running" && job.pid && !isAlive(job.pid)) {
+    job.status = "failed";
+    job.finishedAt = Date.now();
+    job.stderr = (job.stderr || "") + "worker process died before completion\n";
+    try { writeJob(job); } catch {}
   }
-  return best;
+  return job;
+}
+function allJobs() {
+  let files;
+  try { files = fs.readdirSync(JOBS_DIR).filter(f => f.endsWith(".json") && !f.startsWith(".")); } catch { return []; }
+  return files.map(f => readJob(f.replace(/\.json$/, ""))).filter(Boolean)
+    .sort((a, b) => b.startedAt - a.startedAt);
+}
+function latestJob() { return allJobs()[0] || null; }
+// Keep newest JOB_RETENTION finished jobs; delete older finished ones. Never
+// prunes a running job.
+function pruneJobs() {
+  const finished = allJobs().filter(j => j.status !== "running");
+  for (const j of finished.slice(JOB_RETENTION)) {
+    try { fs.unlinkSync(jobPath(j.id)); } catch {}
+  }
 }
 
 // Build the agy argv for a prompt run. mode: 'plan' (read-only) | 'accept-edits'.
@@ -139,10 +165,14 @@ async function cmdTask(argv) {
     process.exit(r.code === 0 ? 0 : 1);
   }
   const id = newId("agytask");
-  writeJob({ id, kind: "task", status: "running", cwd, prompt, startedAt: Date.now(), agyArgs });
+  const job = { id, kind: "task", status: "running", cwd, prompt, startedAt: Date.now(), agyArgs };
+  writeJob(job); // file must exist before worker reads it
   const worker = spawn(process.execPath, [scriptPath, "_worker", id], { cwd, detached: true, stdio: "ignore" });
+  job.pid = worker.pid; // record for liveness checks / cancel
+  writeJob(job);
   worker.unref();
-  console.log(JSON.stringify({ jobId: id, status: "running" }, null, 2));
+  pruneJobs();
+  console.log(JSON.stringify({ jobId: id, status: "running", pid: worker.pid }, null, 2));
 }
 
 async function cmdWorker(argv) {
@@ -198,25 +228,38 @@ async function cmdReview(argv, adversarial) {
 function cmdStatus(argv) {
   const o = parseFlags(argv, { bools: ["all"], vals: [] });
   if (o.all) {
-    let files;
-    try { files = fs.readdirSync(JOBS_DIR).filter(f => f.endsWith(".json")); } catch { files = []; }
-    const jobs = files.map(f => readJob(f.replace(/\.json$/, ""))).filter(Boolean)
-      .sort((a, b) => b.startedAt - a.startedAt)
-      .map(j => ({ jobId: j.id, kind: j.kind, status: j.status }));
+    const jobs = allJobs().map(j => reconcile(j))
+      .map(j => ({ jobId: j.id, kind: j.kind, status: j.status, pid: j.pid }));
     console.log(JSON.stringify(jobs, null, 2));
     return;
   }
-  const job = o._[0] ? readJob(o._[0]) : latestJob();
+  const job = reconcile(o._[0] ? readJob(o._[0]) : latestJob());
   if (!job) { console.log("No jobs."); return; }
-  console.log(JSON.stringify({ jobId: job.id, kind: job.kind, status: job.status }, null, 2));
+  console.log(JSON.stringify({ jobId: job.id, kind: job.kind, status: job.status, pid: job.pid }, null, 2));
 }
 
 function cmdResult(argv) {
   const o = parseFlags(argv, { bools: [], vals: [] });
+  const job = reconcile(o._[0] ? readJob(o._[0]) : latestJob());
+  if (!job) { console.log("No jobs."); return; }
+  if (job.status === "running") { console.log(`Job ${job.id} still running (pid ${job.pid}).`); return; }
+  if (job.stderr) process.stderr.write(job.stderr);
+  process.stdout.write(job.output || "(no output)\n");
+}
+
+// cancel: kill a running job's worker process group and mark it cancelled.
+function cmdCancel(argv) {
+  const o = parseFlags(argv, { bools: [], vals: [] });
   const job = o._[0] ? readJob(o._[0]) : latestJob();
   if (!job) { console.log("No jobs."); return; }
-  if (job.status === "running") { console.log(`Job ${job.id} still running.`); return; }
-  process.stdout.write(job.output || "(no output)\n");
+  if (job.status !== "running") { console.log(`Job ${job.id} is ${job.status}, nothing to cancel.`); return; }
+  if (job.pid && isAlive(job.pid)) {
+    try { process.kill(-job.pid); } catch { try { process.kill(job.pid); } catch {} } // -pid = detached process group
+  }
+  job.status = "cancelled";
+  job.finishedAt = Date.now();
+  writeJob(job);
+  console.log(`Cancelled ${job.id}.`);
 }
 
 // config: show, set model, or clear.
@@ -288,6 +331,7 @@ async function main() {
     case "adversarial-review": return cmdReview(rest, true);
     case "status": return cmdStatus(rest);
     case "result": return cmdResult(rest);
+    case "cancel": return cmdCancel(rest);
     case "config": return cmdConfig(rest);
     case "hint": return cmdHint();
     case "_worker": return cmdWorker(rest);
