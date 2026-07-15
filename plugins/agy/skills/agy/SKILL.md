@@ -7,6 +7,12 @@ description: Run Google Antigravity (`agy` CLI) headlessly for a second opinion,
 
 Thin wrapper over `${CLAUDE_PLUGIN_ROOT}/scripts/agy-companion.mjs`, which drives the `agy` CLI in headless (`-p`) mode.
 
+**When unsure of the active model, available models, or commands, run `hint` first and show it to the user:**
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/agy-companion.mjs" hint
+```
+
 ## Commands
 
 ```bash

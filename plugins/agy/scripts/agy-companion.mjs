@@ -45,6 +45,7 @@ function usage() {
   agy-companion status [job-id] [--all]
   agy-companion result [job-id]
   agy-companion config [set-model "<name>" | clear-model]
+  agy-companion hint
 
   Permissions: default read-only. --write allows edits (still prompts). --yolo bypasses prompts.`);
 }
@@ -202,6 +203,32 @@ function cmdConfig(argv) {
   console.log(JSON.stringify({ config: readConfig(), resolvedModel: resolveModel() || "(agy default)" }, null, 2));
 }
 
+// hint: live cheat-sheet — current model, available agy models, commands, permission modes.
+function cmdHint() {
+  let models = "(run `agy models` to list)";
+  try { models = execFileSync(AGY_BIN, ["models"], { encoding: "utf8" }).trim(); } catch {}
+  const active = resolveModel();
+  const cfg = readConfig();
+  const src = process.env.AGY_MODEL ? "AGY_MODEL env"
+    : cfg.model ? "saved config" : "built-in default";
+  console.log(`agy — Google Antigravity from Claude Code
+
+Active model : ${active}   (from ${src})
+Available    :
+${models.split("\n").map(m => "  " + m).join("\n")}
+
+Commands:
+  task [--background] [--write] [--yolo] [--resume] [--model "<name>"] "<prompt>"
+  review / adversarial-review [--base <ref>] [--scope auto|working-tree|branch]
+  status [--all] | result [job-id]
+  config set-model "<name>" | clear-model
+  hint
+
+Permissions: (default) read-only · --write edits+prompt · --yolo bypass prompts
+Model set   : --model persists as new default; precedence flag > env > config > default
+Tip         : model name must match "agy models" exactly, quotes included.`);
+}
+
 function parseFlags(argv, { bools, vals }) {
   const o = { _: [] };
   for (let i = 0; i < argv.length; i++) {
@@ -225,6 +252,7 @@ async function main() {
     case "status": return cmdStatus(rest);
     case "result": return cmdResult(rest);
     case "config": return cmdConfig(rest);
+    case "hint": return cmdHint();
     case "_worker": return cmdWorker(rest);
     case undefined: case "help": case "--help": return usage();
     default: console.error("unknown subcommand: " + sub); usage(); process.exit(2);
