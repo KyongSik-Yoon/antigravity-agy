@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codex Review Loop"
+  short_description: "Triage GitLab Codex reviews to convergence"
+  default_prompt: "Use $codex-review-loop for a bounded GitLab MR review loop with evidence-based rebuttals, verified fixes, and SHA-safe state."
