@@ -1,2 +1,6 @@
 node_modules/
 .DS_Store
+
+# 파이썬 캐시 파일 제외
+__pycache__/
+*.pyc
