@@ -73,7 +73,11 @@ cleanup backed by durable terminal state with `runnersStopped:true`: it preserve
 replacement object and advances only local cleanup. The runtime reports remote handling
 as `missing`, `released`, or `replaced`; `replaced` is accepted only by that terminal,
 stopped cleanup path. A crashed loop is resumed from its handoff directory so its owner
-can release the lock safely.
+can release the lock safely. On an `acquire` collision the runtime does not fail
+opaquely: it reports the current holder's `owner`, `loopId`, and age (from the lock
+commit) plus the exact `--force-with-lease` stale-release command, so an orphaned lock
+is diagnosable at a glance — but releasing it stays a manual operator step (never
+automatic, since a live owner on another host is indistinguishable from a dead one).
 `lock reconcile-acquire` always requires the exact private bootstrap recovery file;
 the CLI and handler both reject calls that omit this capability before any remote
 observation or mutation.
@@ -901,11 +905,39 @@ rebuttal categories from practice:
 - **Design intent**: locale-invariant technical labels, vanilla-parity operational
   identifiers, etc. Rebut with the design rationale.
 
-### 3. Fix + verify
+Triage stays on the host (the Advisor): only findings that survive rebuttal proceed to
+step 3, where the code-writing labor is delegated to agy.
 
-Apply fixes, then run the project verification relevant to the touched area
-(frontend: `vue-tsc --noEmit` 0 errors + `vite build` green + `vitest`; backend:
-scoped `:module:test`). Never push unverified.
+### 3. Fix + verify (delegate the fix leg to agy; verify on the host)
+
+The host stays the **Advisor**: it owns triage, verification, and every remote effect.
+Delegate only the code-writing for the SURVIVING findings to agy (the **Worker**):
+
+1. Write the surviving findings plus the fix contract to a brief FILE inside `$loop_tmp`
+   (never interpolate raw review text into a shell command — the step-4 reply rule
+   applies here too).
+2. Hand the brief to agy with edit permission:
+
+   ```bash
+   node "${CLAUDE_PLUGIN_ROOT}/scripts/agy-companion.mjs" task --write \
+     "codex 리뷰 finding을 반영해 수정하라. 트리아지·반박은 호스트가 이미 끝냈으니 아래
+      생존 finding만 구현하고 스코프를 넘지 마라. 저장소 컨벤션 준수, 커밋/푸시는 하지
+      마라(호스트가 검증 후 처리). 브리프 파일: <brief-path>"
+   ```
+
+   - Default model handles additive/mechanical fixes; for a subtle finding pass
+     `--model "Gemini 3.1 Pro (High)"` or `"Claude Opus 4.6 (Thinking)"`.
+   - `--background` for long fixes; poll with `status`, collect with `result`.
+3. **Never trust agy's completion report.** The host reviews the diff directly and runs
+   the verification for the touched area (frontend: `vue-tsc --noEmit` 0 errors +
+   `vite build` + `vitest`; backend: scoped `:module:test`; for this skill itself: the
+   runtime test suite + runtime.py mirror-identity + any boundary check). Never push
+   unverified.
+4. On a failed or incomplete agy diff, re-brief agy ONCE with the exact failure output;
+   after a second failure the host finishes the fix inline. Seam-sensitive edits
+   (lock/CAS, state-machine, mirror-identical files) that agy churns on stay host-inline
+   by default — the fix leg delegates the labor, never the judgment. Rebuttals are never
+   delegated: the host writes them (step 4).
 
 ### 4. Commit + push + reply
 

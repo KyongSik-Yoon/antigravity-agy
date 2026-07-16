@@ -815,6 +815,59 @@ def _lock_payload_from_git(git_directory: Path | None, lock_object: str) -> str 
     return payload.stdout if payload.returncode == 0 else None
 
 
+def _human_age(created_iso: str) -> str:
+    normalized = created_iso[:-1] + "+00:00" if created_iso.endswith("Z") else created_iso
+    try:
+        parsed = dt.datetime.fromisoformat(normalized)
+    except ValueError:
+        return ""
+    if parsed.tzinfo is None:
+        return ""
+    seconds = dt.datetime.now(dt.timezone.utc).timestamp() - parsed.timestamp()
+    if seconds < 0:
+        return ""
+    if seconds >= 3600:
+        return f", ~{seconds / 3600:.0f}h ago"
+    return f", ~{seconds / 60:.0f}m ago"
+
+
+def _describe_held_lock(remote: str, ref: str, current: str) -> str:
+    # Human-facing diagnostic for an already-held lock: who holds it and how old,
+    # plus the exact release command for a stale one. This NEVER releases the lock
+    # itself — automatic stealing is unsafe (a live owner on another host cannot be
+    # distinguished from a dead one); the operator confirms and runs the command.
+    lines = [f"MR lock is already held: {ref} -> {current}"]
+    # Fetch the ref so the held object's metadata is readable locally (rare path).
+    _git("fetch", "--no-tags", remote, ref, check=False)
+    loop_id = owner = ""
+    payload = _lock_payload_from_git(None, current)
+    if payload:
+        for entry in payload.splitlines():
+            if entry.startswith("loopId="):
+                loop_id = entry[len("loopId="):].strip()
+            elif entry.startswith("owner="):
+                owner = entry[len("owner="):].strip()
+    created = ""
+    shown = _git("show", "-s", "--format=%cI", current, check=False)
+    if shown.returncode == 0 and shown.stdout.strip():
+        created = shown.stdout.strip()
+    detail = []
+    if owner:
+        detail.append(f"owner={owner}")
+    if loop_id:
+        detail.append(f"loopId={loop_id}")
+    if created:
+        detail.append(f"created={created}{_human_age(created)}")
+    if detail:
+        lines.append("held by " + ", ".join(detail))
+    lines.append(
+        "If that loop is dead, release the stale lock manually (never automatic — "
+        "confirm the owner is not still running on another host first):"
+    )
+    lines.append(f"  git push {remote} --force-with-lease={ref}:{current} :{ref}")
+    return "\n".join(lines)
+
+
 def _validate_lock_payload(lock_object: str, loop_id: str, owner: str, remote: str, ref: str) -> None:
     expected = f"codex-review-loop-lock\nloopId={loop_id}\nowner={owner}\n"
     payload = _lock_payload_from_git(None, lock_object)
@@ -919,7 +972,7 @@ def acquire_lock(args: argparse.Namespace) -> None:
         )
     current = _remote_lock_sha(args.remote, args.ref)
     if current:
-        error(f"MR lock is already held: {args.ref} -> {current}", 2)
+        error(_describe_held_lock(args.remote, args.ref, current), 2)
     result = _git("push", "--porcelain", "--atomic", args.remote, f"{lock_object}:{args.ref}", check=False)
     if result.returncode != 0:
         if result.returncode == 124:

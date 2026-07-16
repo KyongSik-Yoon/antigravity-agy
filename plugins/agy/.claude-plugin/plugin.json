@@ -1,6 +1,6 @@
 {
   "name": "agy",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Use Google Antigravity (agy) from Claude Code to review code or delegate tasks.",
   "author": {
     "name": "KyongSik-Yoon"

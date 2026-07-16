@@ -1920,6 +1920,43 @@ class ReviewLoopRuntimeTest(unittest.TestCase):
         invalid = run_runtime("parse-iso", "not-a-timestamp")
         self.assertNotEqual(0, invalid.returncode)
 
+    def test_acquire_reports_held_lock_with_owner_and_release_hint(self) -> None:
+        # 락이 이미 잡혀 있으면 acquire가 조용히 실패하지 말고, 소유자·loopId·나이와
+        # 정확한 release 명령을 진단으로 내야 합니다(자동 탈취는 하지 않음).
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            bare = base / "remote.git"
+            repository = base / "repo"
+            subprocess.run(["git", "init", "--bare", str(bare)], check=True, stdout=subprocess.PIPE)
+            subprocess.run(["git", "init", str(repository)], check=True, stdout=subprocess.PIPE)
+            ref = "refs/heads/codex-review-locks/mr-570"
+
+            first = run_runtime(
+                "lock", "acquire", "--remote", str(bare), "--ref", ref,
+                "--loop-id", "loop-a", "--owner", "alice@hostA",
+                "--recovery-file", str(base / "boot-a"), cwd=repository,
+            )
+            self.assertEqual(0, first.returncode, first.stderr)
+            held = first.stdout.strip()
+
+            second = run_runtime(
+                "lock", "acquire", "--remote", str(bare), "--ref", ref,
+                "--loop-id", "loop-b", "--owner", "bob@hostB",
+                "--recovery-file", str(base / "boot-b"), cwd=repository,
+            )
+            self.assertEqual(2, second.returncode)
+            self.assertIn("already held", second.stderr)
+            self.assertIn("owner=alice@hostA", second.stderr)
+            self.assertIn("loopId=loop-a", second.stderr)
+            self.assertIn(f"--force-with-lease={ref}:{held}", second.stderr)
+            self.assertEqual(
+                held,
+                subprocess.run(
+                    ["git", "--git-dir", str(bare), "rev-parse", ref],
+                    check=True, text=True, stdout=subprocess.PIPE,
+                ).stdout.strip(),
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
