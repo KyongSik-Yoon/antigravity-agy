@@ -29,13 +29,14 @@ OpenAI `codex` 플러그인의 `agy` 버전. Antigravity가 노출하는 Gemini 
 | `/agy:status [--all]` | 백그라운드 job 상태 |
 | `/agy:result [job-id]` | 완료된 백그라운드 job 결과 회수 |
 | `/agy:config [set-model "<이름>"]` | 기본 모델 조회/저장 |
+| `/agy:models [--json]` | `agy models` 실시간 목록 (ID + 이름, 현재 모델에 *) |
 | `/agy:hint` | 치트시트: 현재 모델, 가능 모델, 커맨드 |
 
 ## 모델 선택
 
 기본 모델: **`Gemini 3.8 Flash (High)`**.
 
-단발: `--model "<이름>"` (`agy models` 출력 정확 문자열, 예: `"Gemini 4 Argon (High)"`).
+단발: `--model "<ID|이름>"` — `/agy:models`에 나온 ID나 이름 (예: `gemini-4-argon-high`, `"Gemini 4 Argon (High)"`). 대소문자는 가리지 않고, 목록에 없으면 실시간 목록과 비슷한 후보를 보여 주고 거부한다.
 `task`에 전달한 `--model`은 새 기본값으로 **저장**된다.
 
 영속 기본값(`~/.claude/agy/config.json`):

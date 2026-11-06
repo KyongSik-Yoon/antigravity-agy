@@ -30,13 +30,14 @@ each CLI keeps its own auth, Claude just shells out.
 | `/agy:result [job-id]` | Fetch a finished background job's output |
 | `/agy:cancel [job-id]` | Cancel a running background job |
 | `/agy:config [set-model "<name>"]` | Show or persist the default model |
+| `/agy:models [--json]` | Live model list from `agy models` (id + name, active starred) |
 | `/agy:hint` | Cheat-sheet: active model, available models, commands |
 
 ## Model selection
 
 Default model: **`Gemini 3.8 Flash (High)`**.
 
-Per-call: `--model "<name>"` (exact string from `agy models`, e.g. `"Gemini 4 Argon (High)"`).
+Per-call: `--model "<id|name>"` — an id or name from `/agy:models` (e.g. `gemini-4-argon-high` or `"Gemini 4 Argon (High)"`). Matching is case-insensitive; an unknown name is rejected with the live list and close matches.
 A `--model` passed to `task` is **persisted** as the new default.
 
 Persisted default (`~/.claude/agy/config.json`):

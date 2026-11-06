@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // agy-companion: thin runtime wrapping the `agy` CLI, mirroring codex-companion.
-// Subcommands: task, review, adversarial-review, status, result.
+// Subcommands: task, review, adversarial-review, status, result, cancel, models, config, hint.
 // agy has no native background/job store, so we add a file-based one here.
 //
 // Permission model (deliberate, safe-by-default):
@@ -37,6 +37,45 @@ function persistModel(name) {
   const cfg = readConfig(); cfg.model = name; writeConfig(cfg);
 }
 
+// Live model list from `agy models` (stdout: "<id>\t<display name>" per line).
+// Returns [{id, name}] or null when agy cannot be queried.
+function fetchModels() {
+  let out;
+  try { out = execFileSync(AGY_BIN, ["models"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }); }
+  catch { return null; }
+  const models = out.split("\n").map(l => l.split("\t")).filter(p => p.length >= 2 && p[0].trim())
+    .map(([id, name]) => ({ id: id.trim(), name: name.trim() }));
+  return models.length ? models : null;
+}
+
+function formatModels(models, active) {
+  const w = Math.max(...models.map(m => m.id.length));
+  return models.map(m => {
+    const on = active && (m.name === active || m.id === active) ? "*" : " ";
+    return `${on} ${m.id.padEnd(w)}  ${m.name}`;
+  }).join("\n");
+}
+
+// Resolve a user-supplied model (id or display name, case-insensitive) to the
+// exact display name agy lists. Exits with the live list when it does not match.
+// If agy cannot be queried, passes the name through unchanged with a warning.
+function validateModel(input, where) {
+  const models = fetchModels();
+  if (!models) {
+    console.error(`${where}: could not run \`agy models\`; using "${input}" unchecked.`);
+    return input;
+  }
+  const key = input.trim().toLowerCase();
+  const hit = models.find(m => m.id.toLowerCase() === key || m.name.toLowerCase() === key);
+  if (hit) return hit.name;
+  const tokens = key.split(/[\s()\-_]+/).filter(Boolean);
+  const near = models.filter(m => tokens.every(t => `${m.id} ${m.name}`.toLowerCase().includes(t)));
+  console.error(`${where}: unknown model "${input}".` +
+    (near.length ? `\nDid you mean:\n${formatModels(near)}` : "") +
+    `\nAvailable models (id  name — either form works):\n${formatModels(models)}`);
+  process.exit(2);
+}
+
 function usage() {
   console.log(`Usage:
   agy-companion task [--background] [--write] [--yolo] [--resume] [--model <m>] [--print-timeout <d>] [prompt]
@@ -45,7 +84,8 @@ function usage() {
   agy-companion status [job-id] [--all]
   agy-companion result [job-id]
   agy-companion cancel [job-id]
-  agy-companion config [set-model "<name>" | clear-model]
+  agy-companion models [--json]
+  agy-companion config [set-model "<id|name>" | clear-model]
   agy-companion hint
 
   Permissions: default read-only. --write allows edits (still prompts). --yolo bypasses prompts.`);
@@ -183,7 +223,10 @@ async function cmdTask(argv) {
   const prompt = o._.join(" ").trim();
   if (!prompt) { console.error("task: prompt required"); process.exit(2); }
   const cwd = process.cwd();
-  if (o.model) persistModel(o.model); // --model doubles as "remember this default"
+  if (o.model) {
+    o.model = validateModel(o.model, "task");
+    persistModel(o.model); // --model doubles as "remember this default"
+  }
   const mode = (o.write || o.yolo) ? "accept-edits" : "plan";
   const agyArgs = buildAgyArgs({
     prompt, mode, yolo: o.yolo, resume: o.resume, model: resolveModel(o.model),
@@ -302,9 +345,10 @@ function cmdConfig(argv) {
   const [action, ...rest] = argv;
   if (action === "set-model") {
     const name = rest.join(" ").trim();
-    if (!name) { console.error("config set-model: model name required"); process.exit(2); }
-    const cfg = readConfig(); cfg.model = name; writeConfig(cfg);
-    console.log(`Saved default model: ${name}`);
+    if (!name) { console.error("config set-model: model name required (see `models`)"); process.exit(2); }
+    const exact = validateModel(name, "config set-model");
+    const cfg = readConfig(); cfg.model = exact; writeConfig(cfg);
+    console.log(`Saved default model: ${exact}`);
     return;
   }
   if (action === "clear-model") {
@@ -315,30 +359,50 @@ function cmdConfig(argv) {
   console.log(JSON.stringify({ config: readConfig(), resolvedModel: resolveModel() || "(agy default)" }, null, 2));
 }
 
+function modelSource() {
+  return process.env.AGY_MODEL ? "AGY_MODEL env" : readConfig().model ? "saved config" : "built-in default";
+}
+
+// models: live list from `agy models`, active one starred; flags the active
+// model when agy no longer lists it. --json for machine-readable output.
+function cmdModels(argv) {
+  const json = argv.includes("--json");
+  const models = fetchModels();
+  const active = resolveModel();
+  if (!models) { console.error("models: could not run `agy models` (is agy installed and logged in?)"); process.exit(1); }
+  const listed = models.some(m => m.name === active || m.id === active);
+  if (json) {
+    console.log(JSON.stringify({ active, activeSource: modelSource(), activeListed: listed, models }, null, 2));
+    return;
+  }
+  console.log(`Active: ${active}   (from ${modelSource()})${listed ? "" : "   ⚠ not in agy's list — set a current one with config set-model"}
+${formatModels(models, active)}
+
+Pass either the id or the name to --model / config set-model.`);
+}
+
 // hint: live cheat-sheet — current model, available agy models, commands, permission modes.
 function cmdHint() {
-  let models = "(run `agy models` to list)";
-  try { models = execFileSync(AGY_BIN, ["models"], { encoding: "utf8" }).trim(); } catch {}
   const active = resolveModel();
-  const cfg = readConfig();
-  const src = process.env.AGY_MODEL ? "AGY_MODEL env"
-    : cfg.model ? "saved config" : "built-in default";
+  const list = fetchModels();
+  const models = list ? formatModels(list, active) : "  (run `agy models` to list)";
   console.log(`agy — Google Antigravity from Claude Code
 
-Active model : ${active}   (from ${src})
+Active model : ${active}   (from ${modelSource()})
 Available    :
-${models.split("\n").map(m => "  " + m).join("\n")}
+${models}
 
 Commands:
   task [--background] [--write] [--yolo] [--resume] [--model "<name>"] "<prompt>"
   review / adversarial-review [--base <ref>] [--scope auto|working-tree|branch]
   status [--all] | result [job-id]
-  config set-model "<name>" | clear-model
+  models [--json]                 live list from \`agy models\`
+  config set-model "<id|name>" | clear-model
   hint
 
 Permissions: (default) read-only · --write edits+prompt · --yolo bypass prompts
 Model set   : --model persists as new default; precedence flag > env > config > default
-Tip         : model name must match "agy models" exactly, quotes included.`);
+Tip         : --model / set-model take an id or name from \`models\`; unknown names are rejected.`);
 }
 
 function parseFlags(argv, { bools, vals }) {
@@ -365,6 +429,7 @@ async function main() {
     case "result": return cmdResult(rest);
     case "cancel": return cmdCancel(rest);
     case "config": return cmdConfig(rest);
+    case "models": return cmdModels(rest);
     case "hint": return cmdHint();
     case "_worker": return cmdWorker(rest);
     case undefined: case "help": case "--help": return usage();
