@@ -33,17 +33,17 @@ OpenAI `codex` 플러그인의 `agy` 버전. Antigravity가 노출하는 Gemini 
 
 ## 모델 선택
 
-기본 모델: **`Gemini 3.5 Flash (High)`**.
+기본 모델: **`Gemini 3.8 Flash (High)`**.
 
-단발: `--model "<이름>"` (`agy models` 출력 정확 문자열, 예: `"Gemini 3.1 Pro (High)"`).
+단발: `--model "<이름>"` (`agy models` 출력 정확 문자열, 예: `"Gemini 4 Argon (High)"`).
 `task`에 전달한 `--model`은 새 기본값으로 **저장**된다.
 
 영속 기본값(`~/.claude/agy/config.json`):
 
 ```
-/agy:config set-model "Gemini 3.1 Pro (High)"
+/agy:config set-model "Gemini 4 Argon (High)"
 /agy:config                 # 조회
-/agy:config clear-model     # Gemini 3.5 Flash (High)로 복귀
+/agy:config clear-model     # Gemini 3.8 Flash (High)로 복귀
 ```
 
 우선순위: `--model` 플래그 > `AGY_MODEL` 환경변수 > 저장된 config > 내장 기본값.

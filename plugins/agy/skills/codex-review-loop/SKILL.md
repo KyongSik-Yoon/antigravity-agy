@@ -926,7 +926,7 @@ Delegate only the code-writing for the SURVIVING findings to agy (the **Worker**
    ```
 
    - Default model handles additive/mechanical fixes; for a subtle finding pass
-     `--model "Gemini 3.1 Pro (High)"` or `"Claude Opus 4.6 (Thinking)"`.
+     `--model "Gemini 4 Argon (High)"` or `"Claude Opus 5.5 (High)"`.
    - `--background` for long fixes; poll with `status`, collect with `result`.
 3. **Never trust agy's completion report.** The host reviews the diff directly and runs
    the verification for the touched area (frontend: `vue-tsc --noEmit` 0 errors +

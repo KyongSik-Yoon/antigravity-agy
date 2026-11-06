@@ -27,7 +27,7 @@ function writeConfig(cfg) {
   fs.mkdirSync(AGY_HOME, { recursive: true, mode: 0o700 });
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2), { mode: 0o600 });
 }
-const DEFAULT_MODEL = "Gemini 3.5 Flash (High)";
+const DEFAULT_MODEL = "Gemini 3.8 Flash (High)";
 // Precedence: explicit --model flag > AGY_MODEL env > config.json > built-in default.
 function resolveModel(flagModel) {
   return flagModel || process.env.AGY_MODEL || readConfig().model || DEFAULT_MODEL;

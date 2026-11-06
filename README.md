@@ -34,17 +34,17 @@ each CLI keeps its own auth, Claude just shells out.
 
 ## Model selection
 
-Default model: **`Gemini 3.5 Flash (High)`**.
+Default model: **`Gemini 3.8 Flash (High)`**.
 
-Per-call: `--model "<name>"` (exact string from `agy models`, e.g. `"Gemini 3.1 Pro (High)"`).
+Per-call: `--model "<name>"` (exact string from `agy models`, e.g. `"Gemini 4 Argon (High)"`).
 A `--model` passed to `task` is **persisted** as the new default.
 
 Persisted default (`~/.claude/agy/config.json`):
 
 ```
-/agy:config set-model "Gemini 3.1 Pro (High)"
+/agy:config set-model "Gemini 4 Argon (High)"
 /agy:config                 # show
-/agy:config clear-model     # back to Gemini 3.5 Flash (High)
+/agy:config clear-model     # back to Gemini 3.8 Flash (High)
 ```
 
 Precedence: `--model` flag > `AGY_MODEL` env var > saved config > built-in default.

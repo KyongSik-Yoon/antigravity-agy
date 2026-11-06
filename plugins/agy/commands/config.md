@@ -11,4 +11,4 @@ Run and return stdout verbatim:
 node "${CLAUDE_PLUGIN_ROOT}/scripts/agy-companion.mjs" config $ARGUMENTS
 ```
 
-Model name must match `agy models` exactly, e.g. `"Gemini 3.1 Pro (High)"`.
+Model name must match `agy models` exactly, e.g. `"Gemini 4 Argon (High)"`.

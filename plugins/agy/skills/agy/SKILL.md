@@ -32,6 +32,6 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/agy-companion.mjs" result [job-id]
 ## Notes
 
 - Background jobs stored under `~/.claude/agy/jobs/`. Poll with `status`, collect with `result`.
-- `--model` takes the exact string from `agy models` (e.g. `"Gemini 3.1 Pro (High)"`, `"Claude Opus 4.6 (Thinking)"`).
+- `--model` takes the exact string from `agy models` (e.g. `"Gemini 4 Argon (High)"`, `"Claude Opus 5.5 (High)"`).
 - `review` needs a git repo. Feeds `git diff` to agy and asks for findings.
 - Requires the `agy` CLI installed and logged in.
